@@ -18,6 +18,8 @@ static V2MIDI::USBDevice MIDIDevice;
 static V2Link::Port Plug(&SerialPlug);
 static V2Link::Port Socket(&SerialSocket);
 
+enum { DRIVER_RAIL = 1, DRIVER_SOLENOID, DRIVER_LAMP };
+
 static class Lamp : public V2Stepper::Power {
 public:
   Lamp(const Power::Config conf, uint8_t index) :
@@ -26,6 +28,7 @@ public:
 
   void trigger(uint8_t channel, float power, float seconds) {
     if (seconds < 0.01f) {
+      _pulse[channel].duration == 0;
       scaleVoltage(channel, 0);
       return;
     }
@@ -59,7 +62,7 @@ private:
   void handleScaleVoltage(uint8_t channel, float fraction) {
     LED.setHSV(_index, V2LED::Cyan, 1, fraction);
   }
-} Lamp({.ampere = 1}, 3);
+} Lamp({.ampere = 1}, DRIVER_LAMP);
 
 static class Solenoid : public V2Stepper::Power {
 public:
@@ -69,6 +72,7 @@ public:
 
   void trigger(uint8_t channel, float power, float seconds) {
     if (seconds < 0.01f) {
+      _pulse[channel].duration = 0;
       scaleVoltage(channel, 0);
       return;
     }
@@ -102,7 +106,7 @@ private:
   void handleScaleVoltage(uint8_t channel, float fraction) {
     LED.setHSV(_index, V2LED::Magenta, 1, fraction);
   }
-} Pulse({.ampere = 1.5}, 2);
+} Pulse({.ampere = 1.5}, DRIVER_SOLENOID);
 
 static class Stepper : public V2Stepper::Motor {
 public:
@@ -124,7 +128,7 @@ public:
 
     const float v = 0.5 + (0.5 * volume);
     Pulse.trigger(V2Music::Keyboard::isBlackKey(note) ? 0 : 1, v, 0.15);
-    _usec     = micros();
+    _usec = micros();
 
     Lamp.trigger(0, 0.6, 0.3);
   }
@@ -156,17 +160,18 @@ private:
         break;
 
       case Move::Stop:
-        //Lamp.trigger(0, 0, 0);
+        // Lamp.trigger(0, 0, 0);
         LED.setBrightness(_index, 0);
         break;
     }
   }
-} Stepper({.ampere       = 0.6,
-           .n_microsteps = 4,
-           .home         = {.speed = 200, .stall = 0.07},
-           .speed        = {.min = 25, .max = 2000, .accel = 2000}
+} Stepper({.ampere           = 0.6,
+           .microsteps_shift = 2,
+           .multisteps_shift = 2,
+           .home             = {.speed = 200, .stall = 0.07},
+           .speed            = {.min = 25, .max = 2000, .accel = 2000}
           },
-          1);
+          DRIVER_RAIL);
 
 static class Power : public V2Power {
 public:
@@ -295,7 +300,7 @@ private:
       return;
     }
 
-    float fraction = (float)velocity / 127;
+    const float fraction = (float)velocity / 127;
     Stepper.positionNote(note, fraction * _speed_max);
   }
 
@@ -304,6 +309,12 @@ private:
       case V2MIDI::ModulationWheel:
         _speed_max = (float)value / 127;
         break;
+
+      case V2MIDI::BreathController: {
+        const float fraction = (float)value / 127;
+        Lamp.trigger(0, 0.6f * fraction, 10);
+        break;
+      }
 
       case V2MIDI::ChannelVolume:
         _volume = (float)value / 127;
@@ -326,6 +337,11 @@ private:
     json_speed["name"]        = "Speed";
     json_speed["number"]      = (uint8_t)V2MIDI::ModulationWheel;
     json_speed["value"]       = _speed_max * 127;
+
+    JsonObject json_light     = json_controller.createNestedObject();
+    json_light["name"]        = "Light";
+    json_light["number"]      = (uint8_t)V2MIDI::BreathController;
+    json_light["value"]       = 0;
 
     JsonObject json_volume = json_controller.createNestedObject();
     json_volume["name"]    = "Volume";
