@@ -11,7 +11,7 @@
 #include <V2Power.h>
 #include <V2Stepper.h>
 
-V2DEVICE_METADATA("net.voltek-labs.attune", 1, "versioduo:samd:step");
+V2DEVICE_METADATA("net.voltek-labs.attune", 2, "versioduo:samd:step");
 
 static V2LED LED(4, PIN_LED_WS2812, &sercom2, SERCOM2, SERCOM2_DMAC_ID_TX, SPI_PAD_0_SCK_1, PIO_SERCOM);
 static V2MIDI::USBDevice MIDIDevice;
@@ -116,7 +116,7 @@ public:
 
   void positionNote(uint8_t note, float speed) {
     // Do not move the head while the trigger is in-between the keys.
-    if ((unsigned long)(micros() - _usec) < 250000)
+    if ((unsigned long)(micros() - _usec) < 350000)
       return;
 
     position(getNotePosition(note), speed);
@@ -126,11 +126,11 @@ public:
     if (getNotePosition(note) != getPosition())
       return;
 
-    const float v = 0.5 + (0.5 * volume);
+    const float v = 0.5f + (0.5f * volume);
     Pulse.trigger(V2Music::Keyboard::isBlackKey(note) ? 0 : 1, v, 0.15);
     _usec = micros();
 
-    Lamp.trigger(0, 0.6, 0.3);
+    Lamp.trigger(0, 0.5, 0.25);
   }
 
 private:
@@ -165,7 +165,7 @@ private:
         break;
     }
   }
-} Stepper({.ampere           = 0.6,
+} Stepper({.ampere           = 0.8,
            .microsteps_shift = 2,
            .multisteps_shift = 2,
            .home             = {.speed = 200, .stall = 0.07},
@@ -329,6 +329,12 @@ private:
 
   void handleSystemReset() override {
     reset();
+  }
+
+  void exportSystem(JsonObject json) override {
+    JsonObject json_power       = json.createNestedObject("power");
+    json_power["volt"]          = truncf(Power.getVoltage() * 10.f) / 10.f;
+    json_power["interruptions"] = Power.getInterruptions();
   }
 
   void exportInput(JsonObject json) override {
