@@ -11,10 +11,9 @@
 #include <V2Power.h>
 #include <V2Stepper.h>
 
-V2DEVICE_METADATA("net.voltek-labs.attune", 2, "versioduo:samd:step");
+V2DEVICE_METADATA("net.voltek-labs.attune", 4, "versioduo:samd:step");
 
 static V2LED LED(4, PIN_LED_WS2812, &sercom2, SERCOM2, SERCOM2_DMAC_ID_TX, SPI_PAD_0_SCK_1, PIO_SERCOM);
-static V2MIDI::USBDevice MIDIDevice;
 static V2Link::Port Plug(&SerialPlug);
 static V2Link::Port Socket(&SerialSocket);
 
@@ -60,7 +59,7 @@ private:
   } _pulse[2] = {};
 
   void handleScaleVoltage(uint8_t channel, float fraction) {
-    LED.setHSV(_index, V2LED::Cyan, 1, fraction);
+    LED.setHSV(_index, V2LED::Cyan, 1, fraction < 0.01f ? 0 : 0.5);
   }
 } Lamp({.ampere = 1}, DRIVER_LAMP);
 
@@ -104,7 +103,7 @@ private:
   } _pulse[2] = {};
 
   void handleScaleVoltage(uint8_t channel, float fraction) {
-    LED.setHSV(_index, V2LED::Magenta, 1, fraction);
+    LED.setHSV(_index, V2LED::Magenta, 1, fraction < 0.01f ? 0 : 0.5);
   }
 } Pulse({.ampere = 1.5}, DRIVER_SOLENOID);
 
@@ -123,14 +122,14 @@ public:
   }
 
   void playNote(uint8_t note, float volume) {
-    if (getNotePosition(note) != getPosition())
+    if (getNotePosition(note) != (uint32_t)getPosition())
       return;
 
     const float v = 0.5f + (0.5f * volume);
     Pulse.trigger(V2Music::Keyboard::isBlackKey(note) ? 0 : 1, v, 0.15);
     _usec = micros();
 
-    Lamp.trigger(0, 0.5, 0.25);
+    // Lamp.trigger(0, 0.5, 0.25);
   }
 
 private:
@@ -150,12 +149,12 @@ private:
   void handleMovement(Move move) override {
     switch (move) {
       case Move::Forward:
-        Lamp.trigger(0, 0.2, 3);
+        // Lamp.trigger(0, 0.2, 3);
         LED.setHSV(_index, V2LED::Blue, 1, 0.5);
         break;
 
       case Move::Reverse:
-        Lamp.trigger(0, 0.2, 3);
+        // Lamp.trigger(0, 0.2, 3);
         LED.setHSV(_index, V2LED::Yellow, 1, 0.5);
         break;
 
@@ -167,7 +166,6 @@ private:
   }
 } Stepper({.ampere           = 0.8,
            .microsteps_shift = 2,
-           .multisteps_shift = 2,
            .home             = {.speed = 200, .stall = 0.07},
            .speed            = {.min = 25, .max = 2000, .accel = 2000}
           },
@@ -223,7 +221,10 @@ public:
 
     system.download = "https://versioduo.com/download";
 
-    configuration = {.magic = 0x9e020000 | USB_PID, .size = sizeof(config), .data = &config};
+    // https://github.com/versioduo/arduino-board-package/blob/master/boards.txt
+    usb.pid = 0xef20;
+
+    configuration = {.magic = 0x9e020000 | usb.pid, .size = sizeof(config), .data = &config};
   }
 
   // 88 notes. The middle C, MIDI note 60, in this mapping is C3.
@@ -306,21 +307,21 @@ private:
 
   void handleControlChange(uint8_t channel, uint8_t controller, uint8_t value) override {
     switch (controller) {
-      case V2MIDI::ModulationWheel:
+      case V2MIDI::CC::ModulationWheel:
         _speed_max = (float)value / 127;
         break;
 
-      case V2MIDI::BreathController: {
+      case V2MIDI::CC::BreathController: {
         const float fraction = (float)value / 127;
         Lamp.trigger(0, 0.6f * fraction, 10);
         break;
       }
 
-      case V2MIDI::ChannelVolume:
+      case V2MIDI::CC::ChannelVolume:
         _volume = (float)value / 127;
         break;
 
-      case V2MIDI::AllNotesOff:
+      case V2MIDI::CC::AllNotesOff:
         allNotesOff();
 
         break;
@@ -341,17 +342,17 @@ private:
     JsonArray json_controller = json.createNestedArray("controllers");
     JsonObject json_speed     = json_controller.createNestedObject();
     json_speed["name"]        = "Speed";
-    json_speed["number"]      = (uint8_t)V2MIDI::ModulationWheel;
+    json_speed["number"]      = (uint8_t)V2MIDI::CC::ModulationWheel;
     json_speed["value"]       = _speed_max * 127;
 
-    JsonObject json_light     = json_controller.createNestedObject();
-    json_light["name"]        = "Light";
-    json_light["number"]      = (uint8_t)V2MIDI::BreathController;
-    json_light["value"]       = 0;
+    JsonObject json_light = json_controller.createNestedObject();
+    json_light["name"]    = "Light";
+    json_light["number"]  = (uint8_t)V2MIDI::CC::BreathController;
+    json_light["value"]   = 0;
 
     JsonObject json_volume = json_controller.createNestedObject();
     json_volume["name"]    = "Volume";
-    json_volume["number"]  = (uint8_t)V2MIDI::ChannelVolume;
+    json_volume["number"]  = (uint8_t)V2MIDI::CC::ChannelVolume;
     json_volume["value"]   = _volume * 127;
 
     JsonObject json_chromatic = json.createNestedObject("chromatic");
@@ -392,7 +393,7 @@ public:
   }
 
   void loop() {
-    if (!MIDIDevice.receive(&_midi))
+    if (!Device.usb.midi.receive(&_midi))
       return;
 
     if (_midi.getPort() == 0) {
@@ -400,7 +401,7 @@ public:
       // we store the chunk of the message in our packet and receive() again
       // until it is complete.
       if (_midi.storeSystemExclusive())
-        Device.dispatchMIDI(&MIDIDevice, &_midi);
+        Device.dispatchMIDI(&Device.usb.midi, &_midi);
 
     } else {
       _midi.setPort(_midi.getPort() - 1);
@@ -437,10 +438,10 @@ private:
       if (address == 0x0f)
         return;
 
-      if (MIDIDevice.connected()) {
+      if (Device.usb.midi.connected()) {
         packet->receive(&_midi);
         _midi.setPort(address + 1);
-        MIDIDevice.send(&_midi);
+        Device.usb.midi.send(&_midi);
       }
     }
   }
@@ -508,8 +509,6 @@ void setup() {
     digitalWrite(PIN_DRIVER_STEP + i, LOW);
   }
 
-  Device.begin();
-
   static Adafruit_USBD_WebUSB WebUSB;
   static WEBUSB_URL_DEF(WEBUSBLandingPage, 1 /*https*/, "versioduo.com/configure");
   WebUSB.begin();
@@ -517,47 +516,27 @@ void setup() {
 
   LED.begin();
   LED.setMaxBrightness(0.5);
-
-  uint8_t ports = 1;
-  if (Device.system.ports.reboot > 1)
-    ports = Device.system.ports.reboot;
-
-  else if (Device.system.ports.configured > 1)
-    ports = Device.system.ports.configured;
-
-  if (ports > 1) {
-    Device.system.ports.current = ports;
-    MIDIDevice.setPorts(ports);
-
-    // Operating systems/services/apps get confused if the number
-    // of ports changes between device connections; some hang, some
-    // don't probe the device again and ignore the new number of ports.
-    //
-    // To work around it, let the USB ID depend on the number of ports.
-    USBDevice.setID(USB_VID, USB_PID + ports - 1);
-  }
-
-  MIDIDevice.begin();
   Plug.begin();
   Socket.begin();
-
   Power.begin();
   Lamp.begin();
   Pulse.begin();
   Stepper.begin();
-
   Timer::begin();
+  Device.begin();
   Device.reset();
 }
 
 void loop() {
-  LED.loop();
-  MIDI.loop();
-  Link.loop();
-  Device.loop();
-  Power.loop();
-
   Stepper.loop();
   Lamp.loop();
   Pulse.loop();
+  LED.loop();
+  MIDI.loop();
+  Link.loop();
+  Power.loop();
+  Device.loop();
+
+  if (Link.idle() && Device.idle())
+    Device.sleep();
 }
