@@ -11,13 +11,13 @@
 #include <V2Power.h>
 #include <V2Stepper.h>
 
-V2DEVICE_METADATA("net.voltek-labs.attune", 4, "versioduo:samd:step");
+V2DEVICE_METADATA("net.voltek-labs.attune", 5, "versioduo:samd:step");
 
 static V2LED LED(4, PIN_LED_WS2812, &sercom2, SERCOM2, SERCOM2_DMAC_ID_TX, SPI_PAD_0_SCK_1, PIO_SERCOM);
 static V2Link::Port Plug(&SerialPlug);
 static V2Link::Port Socket(&SerialSocket);
 
-enum { DRIVER_RAIL = 1, DRIVER_SOLENOID, DRIVER_LAMP };
+enum { DRIVER_RAIL = 0, DRIVER_SOLENOID , DRIVER_LAMP = 3 };
 
 static class Lamp : public V2Stepper::Power {
 public:
@@ -313,7 +313,8 @@ private:
 
       case V2MIDI::CC::BreathController: {
         const float fraction = (float)value / 127;
-        Lamp.trigger(0, 0.6f * fraction, 10);
+        Lamp.trigger(0, 0.5f * fraction, 10);
+        Lamp.trigger(1, 0.5f * fraction, 10);
         break;
       }
 
@@ -340,6 +341,7 @@ private:
 
   void exportInput(JsonObject json) override {
     JsonArray json_controller = json.createNestedArray("controllers");
+
     JsonObject json_speed     = json_controller.createNestedObject();
     json_speed["name"]        = "Speed";
     json_speed["number"]      = (uint8_t)V2MIDI::CC::ModulationWheel;
