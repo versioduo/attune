@@ -11,7 +11,7 @@
 #include <V2Power.h>
 #include <V2Stepper.h>
 
-V2DEVICE_METADATA("net.voltek-labs.attune", 5, "versioduo:samd:step");
+V2DEVICE_METADATA("net.voltek-labs.attune", 6, "versioduo:samd:step");
 
 static V2LED LED(4, PIN_LED_WS2812, &sercom2, SERCOM2, SERCOM2_DMAC_ID_TX, SPI_PAD_0_SCK_1, PIO_SERCOM);
 static V2Link::Port Plug(&SerialPlug);
@@ -128,8 +128,6 @@ public:
     const float v = 0.5f + (0.5f * volume);
     Pulse.trigger(V2Music::Keyboard::isBlackKey(note) ? 0 : 1, v, 0.15);
     _usec = micros();
-
-    // Lamp.trigger(0, 0.5, 0.25);
   }
 
 private:
@@ -149,17 +147,14 @@ private:
   void handleMovement(Move move) override {
     switch (move) {
       case Move::Forward:
-        // Lamp.trigger(0, 0.2, 3);
         LED.setHSV(_index, V2LED::Blue, 1, 0.5);
         break;
 
       case Move::Reverse:
-        // Lamp.trigger(0, 0.2, 3);
         LED.setHSV(_index, V2LED::Yellow, 1, 0.5);
         break;
 
       case Move::Stop:
-        // Lamp.trigger(0, 0, 0);
         LED.setBrightness(_index, 0);
         break;
     }
@@ -314,7 +309,6 @@ private:
       case V2MIDI::CC::BreathController: {
         const float fraction = (float)value / 127;
         Lamp.trigger(0, 0.5f * fraction, 10);
-        Lamp.trigger(1, 0.5f * fraction, 10);
         break;
       }
 
