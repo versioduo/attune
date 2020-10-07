@@ -11,13 +11,13 @@
 #include <V2Power.h>
 #include <V2Stepper.h>
 
-V2DEVICE_METADATA("net.voltek-labs.attune", 6, "versioduo:samd:step");
+V2DEVICE_METADATA("net.voltek-labs.attune", 7, "versioduo:samd:step");
 
 static V2LED LED(4, PIN_LED_WS2812, &sercom2, SERCOM2, SERCOM2_DMAC_ID_TX, SPI_PAD_0_SCK_1, PIO_SERCOM);
 static V2Link::Port Plug(&SerialPlug);
 static V2Link::Port Socket(&SerialSocket);
 
-enum { DRIVER_RAIL = 0, DRIVER_SOLENOID , DRIVER_LAMP = 3 };
+enum { DRIVER_RAIL = 0, DRIVER_SOLENOID , DRIVER_LAMP };
 
 static class Lamp : public V2Stepper::Power {
 public:
@@ -153,16 +153,15 @@ private:
       case Move::Reverse:
         LED.setHSV(_index, V2LED::Yellow, 1, 0.5);
         break;
-
       case Move::Stop:
         LED.setBrightness(_index, 0);
         break;
     }
   }
-} Stepper({.ampere           = 0.8,
-           .microsteps_shift = 2,
-           .home             = {.speed = 200, .stall = 0.07},
-           .speed            = {.min = 25, .max = 2000, .accel = 2000}
+} Stepper({.ampere           = 1.1,
+           .microsteps_shift = 3,
+           .home             = {.speed = 200, .stall = 0.08},
+           .speed            = {.min = 25, .max = 1200, .accel = 1500}
           },
           DRIVER_RAIL);
 
