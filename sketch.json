@@ -1,0 +1,6 @@
+{
+  "cpu": {
+    "fqbn": "versioduo:samd:step",
+    "name": "attune"
+  }
+}

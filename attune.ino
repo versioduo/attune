@@ -1,23 +1,29 @@
-// Voltek Labs - attune
-//
-// © Kay Sievers 2020
-// Unpublished work. Do not distribute.
+// © Kay Sievers <kay@versioduo.com>, 2020-2022
+// SPDX-License-Identifier: Apache-2.0
 
+#include <V2Base.h>
+#include <V2Color.h>
 #include <V2Device.h>
 #include <V2LED.h>
 #include <V2Link.h>
 #include <V2MIDI.h>
 #include <V2Music.h>
-#include <V2Power.h>
+#include <V2PowerSupply.h>
 #include <V2Stepper.h>
 
-V2DEVICE_METADATA("net.voltek-labs.attune", 7, "versioduo:samd:step");
+V2DEVICE_METADATA("net.voltek-labs.attune", 24, "versioduo:samd:step");
 
-static V2LED LED(4, PIN_LED_WS2812, &sercom2, SERCOM2, SERCOM2_DMAC_ID_TX, SPI_PAD_0_SCK_1, PIO_SERCOM);
+static V2LED::WS2812 LED(4, PIN_LED_WS2812, &sercom2, SPI_PAD_0_SCK_1, PIO_SERCOM);
 static V2Link::Port Plug(&SerialPlug);
 static V2Link::Port Socket(&SerialSocket);
+static V2Base::Timer::Periodic Timer(2, 200000);
+static V2Base::Analog::ADC ADC(V2Base::Analog::ADC::getID(PIN_VOLTAGE_SENSE));
 
-enum { DRIVER_RAIL = 0, DRIVER_SOLENOID , DRIVER_LAMP };
+enum {
+  DriverRail,
+  DriverSolenoid,
+  DriverLamp,
+};
 
 static class Lamp : public V2Stepper::Power {
 public:
@@ -32,7 +38,6 @@ public:
       return;
     }
 
-    scaleVoltage(channel, power);
     _pulse[channel].usec     = micros();
     _pulse[channel].duration = seconds * 1000000;
     scaleVoltage(channel, power);
@@ -56,12 +61,12 @@ private:
   struct {
     unsigned long usec;
     unsigned long duration;
-  } _pulse[2] = {};
+  } _pulse[2]{};
 
   void handleScaleVoltage(uint8_t channel, float fraction) {
-    LED.setHSV(_index, V2LED::Cyan, 1, fraction < 0.01f ? 0 : 0.5);
+    LED.setHSV(_index, V2Color::Cyan, 1, fraction < 0.01f ? 0 : 0.5);
   }
-} Lamp({.ampere = 1}, DRIVER_LAMP);
+} Lamp({.ampere{1}}, DriverLamp);
 
 static class Solenoid : public V2Stepper::Power {
 public:
@@ -100,29 +105,29 @@ private:
   struct {
     unsigned long usec;
     unsigned long duration;
-  } _pulse[2] = {};
+  } _pulse[2]{};
 
   void handleScaleVoltage(uint8_t channel, float fraction) {
-    LED.setHSV(_index, V2LED::Magenta, 1, fraction < 0.01f ? 0 : 0.5);
+    LED.setHSV(_index, V2Color::Magenta, 1, fraction < 0.01f ? 0 : 0.5);
   }
-} Pulse({.ampere = 1.5}, DRIVER_SOLENOID);
+} Pulse({.ampere{1.5}}, DriverSolenoid);
 
 static class Stepper : public V2Stepper::Motor {
 public:
   Stepper(const Motor::Config conf, uint8_t index) :
-    Motor(conf, &SPI, PIN_DRIVER_SELECT + index, PIN_DRIVER_STEP + index),
+    Motor(conf, &Timer, &SPI, PIN_DRIVER_SELECT + index, PIN_DRIVER_STEP + index),
     _index(index) {}
 
-  void positionNote(uint8_t note, float speed) {
+  void positionNote(uint8_t note, float speed, float octave_length) {
     // Do not move the head while the trigger is in-between the keys.
     if ((unsigned long)(micros() - _usec) < 350000)
       return;
 
-    position(getNotePosition(note), speed);
+    position(getNoteSteps(note, octave_length), speed);
   }
 
-  void playNote(uint8_t note, float volume) {
-    if (getNotePosition(note) != (uint32_t)getPosition())
+  void playNote(uint8_t note, float volume, float octave_length) {
+    if (getNoteSteps(note, octave_length) != (uint32_t)getPosition())
       return;
 
     const float v = 0.5f + (0.5f * volume);
@@ -134,10 +139,6 @@ private:
   const uint8_t _index;
   unsigned long _usec = 0;
 
-  uint32_t getNotePosition(uint8_t note) {
-    return getNoteSteps(note, 0.166);
-  }
-
   uint32_t getNoteSteps(uint8_t note, float octave_length) {
     // 40 teeth wheel == 80 mm.
     const float turns = V2Music::Keyboard::getKeyDistance(note, octave_length) / 0.08;
@@ -147,29 +148,28 @@ private:
   void handleMovement(Move move) override {
     switch (move) {
       case Move::Forward:
-        LED.setHSV(_index, V2LED::Blue, 1, 0.5);
+        LED.setHSV(_index, V2Color::Blue, 1, 0.5);
         break;
 
       case Move::Reverse:
-        LED.setHSV(_index, V2LED::Yellow, 1, 0.5);
+        LED.setHSV(_index, V2Color::Yellow, 1, 0.5);
         break;
       case Move::Stop:
         LED.setBrightness(_index, 0);
-        break;
     }
   }
-} Stepper({.ampere           = 1.1,
-           .microsteps_shift = 3,
-           .home             = {.speed = 200, .stall = 0.08},
-           .speed            = {.min = 25, .max = 1200, .accel = 1500}
-          },
-          DRIVER_RAIL);
+} Stepper(
+  {
+    .ampere{1.1},
+    .microsteps_shift{3},
+    .home{.speed{200}, .stall{0.09}},
+    .speed{.min{25}, .max{1200}, .accel{1500}},
+  },
+  DriverRail);
 
-static class Power : public V2Power {
+static class Power : public V2PowerSupply {
 public:
-  Power() : V2Power( {
-    .min = 6, .max = 26
-  }, PIN_VOLTAGE_SENSE) {}
+  Power() : V2PowerSupply({.min{6}, .max{26}}) {}
 
   void begin() {
     pinMode(PIN_DRIVER_ENABLE, OUTPUT);
@@ -177,6 +177,11 @@ public:
   }
 
 private:
+  float handleMeasurement() override {
+    // A voltage 10/100k divider.
+    return 36.f * ADC.readChannel(V2Base::Analog::ADC::getChannel(PIN_VOLTAGE_SENSE));
+  }
+
   void handleOn() override {
     digitalWrite(PIN_DRIVER_ENABLE, LOW);
   }
@@ -186,22 +191,22 @@ private:
   }
 
   void handleNotify(float voltage) override {
-    // Power-loss or commands without a power connection show yellow LEDs.
+    // Power interruption, or commands without a power connection show yellow LEDs.
     if (voltage < config.min) {
-      LED.splashHSV(0.5, V2LED::Yellow, 1, 0.5);
+      LED.splashHSV(0.5, V2Color::Yellow, 1, 0.5);
       return;
     }
 
     // Over-voltage shows red LEDs.
     if (voltage > config.max) {
-      LED.splashHSV(0.5, V2LED::Red, 1, 1);
+      LED.splashHSV(0.5, V2Color::Red, 1, 1);
       return;
     }
 
     // The number of green LEDs shows the voltage.
     float fraction = voltage / (float)config.max;
     uint8_t n      = ceil((float)LED.getNumLEDs() * fraction);
-    LED.splashHSV(0.5, n, V2LED::Green, 1, 0.5);
+    LED.splashHSV(0.5, n, V2Color::Green, 1, 0.5);
   }
 } Power;
 
@@ -213,29 +218,35 @@ public:
     metadata.description = "Piano One";
     metadata.home        = "https://voltek-labs.net/attune";
 
-    system.download = "https://versioduo.com/download";
+    system.download  = "https://versioduo.com/download";
+    system.configure = "https://versioduo.com/configure";
 
     // https://github.com/versioduo/arduino-board-package/blob/master/boards.txt
     usb.pid = 0xef20;
 
-    configuration = {.magic = 0x9e020000 | usb.pid, .size = sizeof(config), .data = &config};
+    configuration = {.size{sizeof(config)}, .data{&config}};
   }
 
-  // 88 notes. The middle C, MIDI note 60, in this mapping is C3.
-  static constexpr struct {
-    uint8_t start;
-    uint8_t count;
-  } notes = {.start = V2MIDI::A(-1), .count = 85};
+  enum class CC {
+    Volume = V2MIDI::CC::ChannelVolume,
+  };
 
   // Config, written to EEPROM.
   struct {
-    uint8_t channel;
-  } config = {
-    .channel = 0,
-  };
+    struct {
+      uint8_t start{V2MIDI::A(-1)};
+      uint8_t count{88};
+      float offset{0.05};
+      float octave_width{0.166};
+    } keys;
+  } config;
 
-  void reset() {
-    digitalWrite(PIN_LED_ONBOARD, LOW);
+private:
+  float _volume    = 1;
+  bool _home       = false;
+  float _speed_max = 1;
+
+  void handleReset() override {
     LED.reset();
     Lamp.reset();
     Pulse.reset();
@@ -250,17 +261,12 @@ public:
     if (!power())
       return;
 
-    // ~1.3m maximum, 40 teeth wheel == 80 mm.
-    Stepper.home((1.3f / 0.08f) * 200.f, 158);
+    // ~1.3m maximum distance, 40 teeth wheel == 80 mm.
+    const float max_steps    = (1.3f / 0.08f) * 200.f;
+    const float offset_steps = (config.keys.offset / 0.08f) * 200.f;
+    Stepper.home(max_steps, offset_steps);
     _home = true;
   }
-
-  void loop() {}
-
-private:
-  float _volume    = 1;
-  bool _home       = false;
-  float _speed_max = 1;
 
   bool power() {
     bool continuous;
@@ -278,10 +284,10 @@ private:
   }
 
   void handleNote(uint8_t channel, uint8_t note, uint8_t velocity) override {
-    if (note < notes.start)
+    if (note < config.keys.start)
       return;
 
-    if (note >= notes.start + notes.count)
+    if (note >= config.keys.start + config.keys.count)
       return;
 
     if (!power())
@@ -291,12 +297,16 @@ private:
       allNotesOff();
 
     if (velocity == 0) {
-      Stepper.playNote(note, _volume);
+      Stepper.playNote(note, _volume, config.keys.octave_width);
       return;
     }
 
     const float fraction = (float)velocity / 127;
-    Stepper.positionNote(note, fraction * _speed_max);
+    Stepper.positionNote(note, fraction * _speed_max, config.keys.octave_width);
+  }
+
+  void handleNoteOff(uint8_t channel, uint8_t note, uint8_t velocity) override {
+    handleNote(channel, note, 0);
   }
 
   void handleControlChange(uint8_t channel, uint8_t controller, uint8_t value) override {
@@ -311,13 +321,13 @@ private:
         break;
       }
 
-      case V2MIDI::CC::ChannelVolume:
+      case (uint8_t)CC::Volume:
         _volume = (float)value / 127;
         break;
 
+      case V2MIDI::CC::AllSoundOff:
       case V2MIDI::CC::AllNotesOff:
         allNotesOff();
-
         break;
     }
   }
@@ -328,75 +338,78 @@ private:
 
   void exportSystem(JsonObject json) override {
     JsonObject json_power       = json.createNestedObject("power");
-    json_power["volt"]          = truncf(Power.getVoltage() * 10.f) / 10.f;
+    json_power["volt"]          = serialized(String(Power.getVoltage(), 1));
     json_power["interruptions"] = Power.getInterruptions();
   }
 
   void exportInput(JsonObject json) override {
     JsonArray json_controller = json.createNestedArray("controllers");
 
-    JsonObject json_speed     = json_controller.createNestedObject();
-    json_speed["name"]        = "Speed";
-    json_speed["number"]      = (uint8_t)V2MIDI::CC::ModulationWheel;
-    json_speed["value"]       = _speed_max * 127;
+    JsonObject json_speed = json_controller.createNestedObject();
+    json_speed["name"]    = "Speed";
+    json_speed["number"]  = V2MIDI::CC::ModulationWheel;
+    json_speed["value"]   = _speed_max * 127;
 
     JsonObject json_light = json_controller.createNestedObject();
-    json_light["name"]    = "Light";
-    json_light["number"]  = (uint8_t)V2MIDI::CC::BreathController;
+    json_light["name"]    = "Brightness";
+    json_light["number"]  = V2MIDI::CC::BreathController;
     json_light["value"]   = 0;
 
     JsonObject json_volume = json_controller.createNestedObject();
     json_volume["name"]    = "Volume";
-    json_volume["number"]  = (uint8_t)V2MIDI::CC::ChannelVolume;
+    json_volume["number"]  = (uint8_t)CC::Volume;
     json_volume["value"]   = _volume * 127;
 
     JsonObject json_chromatic = json.createNestedObject("chromatic");
-    json_chromatic["start"]   = notes.start;
-    json_chromatic["count"]   = notes.count;
-  }
-
-  void exportOutput(JsonObject json) override {
-    json["channel"] = config.channel;
+    json_chromatic["start"]   = config.keys.start;
+    json_chromatic["count"]   = config.keys.count;
   }
 
   void importConfiguration(JsonObject json) override {
-    if (!json["channel"].isNull()) {
-      uint8_t channel = json["channel"];
+    JsonObject json_keys = json["keys"];
+    if (json_keys) {
+      uint8_t start = json_keys["start"];
+      if (start > 0)
+        config.keys.start = start;
 
-      if (channel < 1)
-        config.channel = 0;
+      uint8_t count = json_keys["count"];
+      if (count > 0)
+        config.keys.count = count;
 
-      else if (channel > 16)
-        config.channel = 15;
+      if (!json_keys["offset"].isNull())
+        config.keys.offset = json_keys["offset"];
 
-      else
-        config.channel = channel - 1;
+      const float width = json_keys["width"];
+      if (width > 0)
+        config.keys.octave_width = width;
     }
   }
 
   void exportConfiguration(JsonObject json) override {
-    json["#channel"] = "The MIDI channel to send control values and notes";
-    json["channel"]  = config.channel + 1;
+    JsonObject json_keys = json.createNestedObject("keys");
+    json_keys["#start"]  = "The MIDI number of the first note";
+    json_keys["start"]   = config.keys.start;
+
+    json_keys["#count"] = "The total number of keys";
+    json_keys["count"]  = config.keys.count;
+
+    json_keys["#offset"] = "The start of the first key (meters)";
+    json_keys["offset"]  = config.keys.offset;
+
+    json_keys["#width"] = "The width of one octave (meters)";
+    json_keys["width"]  = config.keys.octave_width;
   }
 } Device;
 
 // Dispatch MIDI packets
 static class MIDI {
 public:
-  MIDI() {
-    _midi.setSystemExclusiveBuffer(_sysex_buffer, sizeof(_sysex_buffer));
-  }
-
   void loop() {
     if (!Device.usb.midi.receive(&_midi))
       return;
 
     if (_midi.getPort() == 0) {
-      // Simple messages are dispatched immediately, if it is sysex message,
-      // we store the chunk of the message in our packet and receive() again
-      // until it is complete.
-      if (_midi.storeSystemExclusive())
-        Device.dispatchMIDI(&Device.usb.midi, &_midi);
+      Device.dispatch(&Device.usb.midi, &_midi);
 
     } else {
       _midi.setPort(_midi.getPort() - 1);
@@ -405,24 +418,22 @@ public:
   }
 
 private:
-  V2MIDI::Packet _midi;
-  uint8_t _sysex_buffer[12288];
+  V2MIDI::Packet _midi{};
 } MIDI;
 
 // Dispatch Link packets
 static class Link : public V2Link {
 public:
-  Link() : V2Link(&Plug, &Socket) {
-    _midi.setSystemExclusiveBuffer(_sysex_buffer, sizeof(_sysex_buffer));
-  }
+  Link() : V2Link(&Plug, &Socket) {}
 
 private:
+  V2MIDI::Packet _midi{};
+
   // Receive a host event from our parent device
   void receivePlug(V2Link::Packet *packet) override {
     if (packet->getType() == V2Link::Packet::Type::MIDI) {
       packet->receive(&_midi);
-      if (_midi.storeSystemExclusive())
-        Device.dispatchMIDI(&Plug, &_midi);
+      Device.dispatch(&Plug, &_midi);
     }
   }
 
@@ -440,57 +451,7 @@ private:
       }
     }
   }
-
-private:
-  V2MIDI::Packet _midi;
-  uint8_t _sysex_buffer[12288];
 } Link;
-
-void TC3_Handler() {
-  noInterrupts();
-
-  Stepper.tick();
-
-  TC3->COUNT16.INTFLAG.bit.MC0 = 1;
-  interrupts();
-}
-
-class Timer {
-public:
-  static void begin() {
-    // Connect clock generator 1, 48MHz.
-    GCLK->PCHCTRL[TC3_GCLK_ID].reg = GCLK_PCHCTRL_GEN_GCLK1_Val | (1 << GCLK_PCHCTRL_CHEN_Pos);
-    while (GCLK->SYNCBUSY.reg > 0)
-      ;
-
-    TC3->COUNT16.CTRLA.bit.ENABLE = 0;
-
-    // Enable match frequency mode.
-    TC3->COUNT16.WAVE.bit.WAVEGEN = TC_WAVE_WAVEGEN_MFRQ;
-    while (TC3->COUNT16.SYNCBUSY.reg != 0)
-      ;
-
-    // Enable the compare interrupt.
-    TC3->COUNT16.INTENSET.reg     = 0;
-    TC3->COUNT16.INTENSET.bit.MC0 = 1;
-
-    TC3->COUNT16.CTRLA.reg = TC_CTRLA_PRESCALER_DIV1;
-    while (TC3->COUNT16.SYNCBUSY.reg != 0)
-      ;
-
-    // 48MHz clock / 200kHz timer = 240 ticks / period.
-    TC3->COUNT16.CC[0].reg = 240;
-    while (TC3->COUNT16.SYNCBUSY.reg != 0)
-      ;
-
-    // Enable IRQ.
-    NVIC_EnableIRQ(TC3_IRQn);
-
-    TC3->COUNT16.CTRLA.bit.ENABLE = 1;
-    while (TC3->COUNT16.SYNCBUSY.reg != 0)
-      ;
-  }
-};
 
 void setup() {
   Serial.begin(9600);
@@ -504,20 +465,30 @@ void setup() {
     digitalWrite(PIN_DRIVER_STEP + i, LOW);
   }
 
-  static Adafruit_USBD_WebUSB WebUSB;
-  static WEBUSB_URL_DEF(WEBUSBLandingPage, 1 /*https*/, "versioduo.com/configure");
-  WebUSB.begin();
-  WebUSB.setLandingPage(&WEBUSBLandingPage);
-
   LED.begin();
   LED.setMaxBrightness(0.5);
+
   Plug.begin();
   Socket.begin();
+  Device.link = &Link;
+
+  // Set the SERCOM interrupt priority, it requires a stable ~300 kHz interrupt
+  // frequency. This needs to be after begin().
+  setSerialPriority(&SerialPlug, 2);
+  setSerialPriority(&SerialSocket, 2);
+
   Power.begin();
   Lamp.begin();
   Pulse.begin();
   Stepper.begin();
-  Timer::begin();
+
+  // The priority needs to be lower than the SERCOM priorities.
+  Timer.begin([]() { Stepper.tick(); });
+  Timer.setPriority(3);
+
+  ADC.begin();
+  ADC.addChannel(V2Base::Analog::ADC::getChannel(PIN_VOLTAGE_SENSE));
+
   Device.begin();
   Device.reset();
 }
