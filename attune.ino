@@ -161,7 +161,7 @@ private:
 } Stepper(
   {
     .ampere{1.1},
-    .microsteps_shift{3},
+    .microstepsShift{3},
     .home{.speed{200}, .stall{0.09}},
     .speed{.min{25}, .max{1200}, .accel{1500}},
   },
@@ -338,7 +338,7 @@ private:
 
   void exportSystem(JsonObject json) override {
     JsonObject json_power       = json.createNestedObject("power");
-    json_power["volt"]          = serialized(String(Power.getVoltage(), 1));
+    json_power["voltage"]       = serialized(String(Power.getVoltage(), 1));
     json_power["interruptions"] = Power.getInterruptions();
   }
 
