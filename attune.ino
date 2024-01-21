@@ -337,30 +337,30 @@ private:
   }
 
   void exportSystem(JsonObject json) override {
-    JsonObject json_power       = json.createNestedObject("power");
+    JsonObject json_power       = json["power"].to<JsonObject>();
     json_power["voltage"]       = serialized(String(Power.getVoltage(), 1));
     json_power["interruptions"] = Power.getInterruptions();
   }
 
   void exportInput(JsonObject json) override {
-    JsonArray json_controller = json.createNestedArray("controllers");
+    JsonArray json_controller = json["controllers"].to<JsonArray>();
 
-    JsonObject json_speed = json_controller.createNestedObject();
+    JsonObject json_speed = json_controller.add<JsonObject>();
     json_speed["name"]    = "Speed";
     json_speed["number"]  = V2MIDI::CC::ModulationWheel;
     json_speed["value"]   = _speed_max * 127;
 
-    JsonObject json_light = json_controller.createNestedObject();
+    JsonObject json_light = json_controller.add<JsonObject>();
     json_light["name"]    = "Brightness";
     json_light["number"]  = V2MIDI::CC::BreathController;
     json_light["value"]   = 0;
 
-    JsonObject json_volume = json_controller.createNestedObject();
+    JsonObject json_volume = json_controller.add<JsonObject>();
     json_volume["name"]    = "Volume";
     json_volume["number"]  = (uint8_t)CC::Volume;
     json_volume["value"]   = _volume * 127;
 
-    JsonObject json_chromatic = json.createNestedObject("chromatic");
+    JsonObject json_chromatic = json["chromatic"].to<JsonObject>();
     json_chromatic["start"]   = config.keys.start;
     json_chromatic["count"]   = config.keys.count;
   }
@@ -386,7 +386,7 @@ private:
   }
 
   void exportConfiguration(JsonObject json) override {
-    JsonObject json_keys = json.createNestedObject("keys");
+    JsonObject json_keys = json["keys"].to<JsonObject>();
     json_keys["#start"]  = "The MIDI number of the first note";
     json_keys["start"]   = config.keys.start;
 
